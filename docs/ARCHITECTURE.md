@@ -9,13 +9,22 @@ flowchart LR
     Queue["Bounded SPSCQueue<Order>"]
     ITCH["ITCHParser"]
     File["ITCH binary file"]
+    Clients["TCP clients"]
+    Gateway["select-based gateway event loop"]
+    Commands["SPSC command queue"]
+    Responses["SPSC response queue"]
   end
   Synthetic --> Feed --> Queue
   File --> ITCH
   Queue --> Loop["ExchangePipeline::processOne"]
-  ITCH --> Main
-  Loop --> Engine["MatchingEngine, owned by consumer thread"]
-  Main["Synchronous ITCH replay"] --> Engine
+  ITCH --> Main["Synchronous ITCH replay"]
+  Loop --> Engine["MatchingEngine"]
+  Main --> Engine
+  Clients --> Gateway --> Commands
+  Commands --> Worker["GatewayEngineWorker thread"]
+  Worker --> Engine
+  Engine --> Responses --> Gateway
+  Gateway --> Clients
   Engine --> Book["OrderBook V3"]
   Book --> Levels["Price-indexed levels + active bitsets"]
   Book --> Index["Order ID index"]
@@ -33,6 +42,6 @@ flowchart LR
 - **ITCH input:** `ITCHParser` converts selected binary message records. In file mode, `main.cpp` sends Add Order records to matching; other recognized records are counted only.
 - **Outputs:** matching trades are accumulated by the caller. The baseline has no separate event stream, gateway, or engine-owned worker thread.
 
-`ExchangePipeline<N>` is the queued single-writer path used by synthetic mode: one producer enqueues orders and one designated consumer calls `processOne`, which owns and mutates the matching engine. Queue-full is explicit as a false return; `FeedThread` retries and shutdown can interrupt that retry. This is a thread-affinity contract, not a class that creates its own engine thread. ITCH replay remains synchronous.
+`ExchangePipeline<N>` is the queued single-writer path used by synthetic mode: one producer enqueues orders and one designated consumer calls `processOne`, which owns and mutates the matching engine. Queue-full is explicit as a false return; `FeedThread` retries and shutdown can interrupt that retry. ITCH replay remains synchronous.
 
-The queued path returns processing results to the caller thread. It has no independent response queue because the caller is also the engine thread in this phase. A network gateway needs a dedicated engine worker and a second SPSC event channel so the gateway thread can continue servicing sockets.
+The TCP path has a single `select` event-loop thread for up to 32 clients. That thread parses and serializes all incoming commands before putting them into the command SPSC queue; it is the sole producer. `GatewayEngineWorker` is the sole consumer and owns the matching engine. It sends acknowledgements and trade events through a second SPSC queue; the gateway thread routes events by connection token. A loopback UDP wakeup socket notifies the `select` loop when engine responses are available. If the command queue is full, the gateway explicitly rejects that request. If the event queue fills, the engine worker applies backpressure until the gateway drains it.

@@ -54,6 +54,8 @@ public:
 
     Order* bestBidFront();
     Order* bestAskFront();
+    const Order* bestBidFront() const;
+    const Order* bestAskFront() const;
 
 private:
     std::unique_ptr<Limit*[]> bid_levels_;

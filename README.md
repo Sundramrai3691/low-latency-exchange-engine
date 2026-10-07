@@ -16,10 +16,13 @@ ctest --preset gcc-release
 ./build/gcc-release/bench_matching
 ./build/gcc-release/bench_spsc
 ./build/gcc-release/bench_pipeline
+./build/gcc-release/bench_gateway 1000
 ./build/gcc-release/matching_engine
 ```
 
 The executable runs a synthetic workload with no arguments, or streams a supplied ITCH file. The repository does not include market-data files.
+
+Start the TCP gateway with `./build/gcc-release/matching_engine --tcp 9000`. See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the line format and responses.
 
 ## Project structure
 
@@ -30,13 +33,14 @@ The executable runs a synthetic workload with no arguments, or streams a supplie
 - `src/pool_allocator.hpp`: fixed-capacity, non-thread-safe free-list pool.
 - `src/concurrency/`: bounded SPSC ring buffer and producer-thread wrapper.
 - `src/exchange_pipeline.hpp`: queue ingress and single-writer engine processing facade.
+- `src/gateway/`: line protocol, command worker, and multi-client TCP gateway.
 - `src/itch/`: selected ITCH message parsing and Add Order conversion.
-- `tests/`: Google Test suites for order books, matching, SPSC/feed thread, ITCH parsing, and pipeline behavior.
-- `benchmarks/`: standalone order-book, matching, SPSC, and direct-versus-queued pipeline timing programs.
+- `tests/`: Google Test suites for order books, matching, SPSC/feed thread, ITCH parsing, pipeline, protocol, and TCP gateway behavior.
+- `benchmarks/`: standalone order-book, matching, SPSC, direct-versus-queued pipeline, and TCP gateway benchmarks.
 
 ## Measured status and limits
 
-The Release build and 58 tests pass on the recorded Windows/MinGW environment. The queued benchmark reports measured throughput and p50/p95/p99/p99.9. See [docs/BASELINE.md](docs/BASELINE.md) for actual run data and its limitations.
+The Release build and 65 tests pass on the recorded Windows/MinGW environment. The pipeline and TCP gateway benchmarks report measured throughput and latency percentiles. See [docs/BASELINE.md](docs/BASELINE.md) and [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for actual run data and its limitations.
 
 One measured run of `bench_pipeline` with 500,000 alternating limit orders on an Intel Core i3-1115G4 (GCC 16.1.0, Release) produced:
 

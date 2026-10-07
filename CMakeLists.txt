@@ -52,6 +52,8 @@ add_executable(tests
     tests/test_gateway_protocol.cpp
     tests/test_gateway_worker.cpp
     tests/test_tcp_gateway.cpp
+    tests/test_pool_allocator.cpp
+    tests/test_replay.cpp
 )
 find_package(Threads REQUIRED)
 target_link_libraries(tests PRIVATE engine GTest::gtest GTest::gtest_main Threads::Threads)
@@ -81,3 +83,7 @@ target_compile_options(bench_pipeline PRIVATE -O3)
 add_executable(bench_gateway benchmarks/bench_gateway.cpp)
 target_link_libraries(bench_gateway PRIVATE engine Threads::Threads)
 target_compile_options(bench_gateway PRIVATE -O3)
+
+add_executable(bench_allocator benchmarks/bench_allocator.cpp)
+target_include_directories(bench_allocator PRIVATE src/)
+target_compile_options(bench_allocator PRIVATE -O3)

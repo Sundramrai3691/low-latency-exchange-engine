@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <functional>
 #include <thread>
 #include <vector>
 
@@ -15,8 +16,9 @@ public:
     using CommandQueue = SPSCQueue<GatewayCommand, QueueSize>;
     using EventQueue = SPSCQueue<GatewayEvent, QueueSize>;
 
-    GatewayEngineWorker(CommandQueue& commands, EventQueue& events)
-        : commands_(commands), events_(events) {}
+    GatewayEngineWorker(CommandQueue& commands, EventQueue& events,
+                        std::function<void()> notify = {})
+        : commands_(commands), events_(events), notify_(std::move(notify)) {}
 
     GatewayEngineWorker(const GatewayEngineWorker&) = delete;
     GatewayEngineWorker& operator=(const GatewayEngineWorker&) = delete;
@@ -34,6 +36,7 @@ public:
 
     void requestStop() noexcept {
         stopping_.store(true, std::memory_order_release);
+        if (notify_) notify_();
     }
 
     bool finished() const noexcept {
@@ -47,6 +50,7 @@ public:
 private:
     void publish(const GatewayEvent& event) {
         while (!events_.push(event)) std::this_thread::yield();
+        if (notify_) notify_();
     }
 
     void run() {
@@ -88,6 +92,7 @@ private:
     CommandQueue& commands_;
     EventQueue& events_;
     MatchingEngine engine_;
+    std::function<void()> notify_;
     std::atomic<bool> stopping_{false};
     std::atomic<bool> finished_{false};
     std::thread thread_;

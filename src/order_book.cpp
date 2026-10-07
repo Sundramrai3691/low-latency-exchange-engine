@@ -131,3 +131,27 @@ Order* OrderBook::bestAskFront() {
     }
     return nullptr;
 }
+
+const Order* OrderBook::bestBidFront() const {
+    for (size_t w = WORDS; w > 0u; --w) {
+        const uint64_t word = bid_bits_[w - 1u];
+        if (word != 0u) {
+            const size_t bit = 63u - static_cast<size_t>(__builtin_clzll(word));
+            const size_t price = (w - 1u) * 64u + bit;
+            return &bid_levels_[price]->head->order;
+        }
+    }
+    return nullptr;
+}
+
+const Order* OrderBook::bestAskFront() const {
+    for (size_t w = 0u; w < WORDS; ++w) {
+        const uint64_t word = ask_bits_[w];
+        if (word != 0u) {
+            const size_t bit = static_cast<size_t>(__builtin_ctzll(word));
+            const size_t price = w * 64u + bit;
+            return &ask_levels_[price]->head->order;
+        }
+    }
+    return nullptr;
+}

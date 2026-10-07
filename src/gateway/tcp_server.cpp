@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -84,6 +85,72 @@ struct Client {
     bool close_after_write{false};
 };
 
+struct WakeupPair {
+    SocketHandle reader{INVALID_SOCKET_HANDLE};
+    SocketHandle writer{INVALID_SOCKET_HANDLE};
+    sockaddr_in destination{};
+
+    bool open() {
+        reader = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        writer = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (reader == INVALID_SOCKET_HANDLE || writer == INVALID_SOCKET_HANDLE) return false;
+
+        sockaddr_in local{};
+        local.sin_family = AF_INET;
+        local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        local.sin_port = 0;
+        if (bind(reader, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0 ||
+            !makeNonBlocking(reader) || !makeNonBlocking(writer)) return false;
+
+#ifdef _WIN32
+        int local_size = sizeof(local);
+#else
+        socklen_t local_size = sizeof(local);
+#endif
+        if (getsockname(reader, reinterpret_cast<sockaddr*>(&local), &local_size) != 0)
+            return false;
+        destination = local;
+        return true;
+    }
+
+    void notify() const noexcept {
+        if (writer == INVALID_SOCKET_HANDLE) return;
+        const char byte = 1;
+#ifdef _WIN32
+        sendto(writer, &byte, 1, 0,
+               reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+#else
+        sendto(writer, &byte, 1, 0,
+               reinterpret_cast<const sockaddr*>(&destination), sizeof(destination));
+#endif
+    }
+
+    void consume() const noexcept {
+        std::array<char, 128> bytes{};
+        for (;;) {
+#ifdef _WIN32
+            const int count = recv(reader, bytes.data(),
+                                   static_cast<int>(bytes.size()), 0);
+#else
+            const int count = static_cast<int>(recv(reader, bytes.data(),
+                                         bytes.size(), 0));
+#endif
+            if (count < 0) {
+                if (wouldBlock()) break;
+                break;
+            }
+            if (count == 0) break;
+        }
+    }
+
+    void close() {
+        closeSocket(reader);
+        closeSocket(writer);
+        reader = INVALID_SOCKET_HANDLE;
+        writer = INVALID_SOCKET_HANDLE;
+    }
+};
+
 } // namespace
 
 struct TcpGatewayServer::Impl {
@@ -154,11 +221,22 @@ int TcpGatewayServer::run() {
     }
     impl_->active_port.store(ntohs(bound.sin_port), std::memory_order_release);
 
+    WakeupPair wakeup;
+    if (!wakeup.open()) {
+        wakeup.close();
+        closeSocket(listener);
+#ifdef _WIN32
+        WSACleanup();
+#endif
+        throw std::runtime_error("wakeup socket creation failed");
+    }
+
     using CommandQueue = SPSCQueue<GatewayCommand, QUEUE_SIZE>;
     using EventQueue = SPSCQueue<GatewayEvent, QUEUE_SIZE>;
     auto commands = std::make_unique<CommandQueue>();
     auto events = std::make_unique<EventQueue>();
-    GatewayEngineWorker<QUEUE_SIZE> worker(*commands, *events);
+    GatewayEngineWorker<QUEUE_SIZE> worker(*commands, *events,
+        [&wakeup] { wakeup.notify(); });
     worker.start();
 
     std::vector<Client> clients;
@@ -221,6 +299,7 @@ int TcpGatewayServer::run() {
         FD_ZERO(&reads);
         FD_ZERO(&writes);
         FD_SET(listener, &reads);
+        FD_SET(wakeup.reader, &reads);
         SocketHandle max_socket = listener;
 
         for (const auto& client : clients) {
@@ -230,10 +309,13 @@ int TcpGatewayServer::run() {
             max_socket = std::max(max_socket, client.socket);
 #endif
         }
+#ifndef _WIN32
+        max_socket = std::max(max_socket, wakeup.reader);
+#endif
 
         timeval timeout{};
         timeout.tv_sec = 0;
-        timeout.tv_usec = 1'000;
+        timeout.tv_usec = 50'000;
         const int ready = selectSockets(max_socket, &reads, &writes, &timeout);
         if (ready < 0) {
             if (wouldBlock()) continue;
@@ -258,6 +340,7 @@ int TcpGatewayServer::run() {
                 clients.push_back(Client{accepted, next_session++, 0, {}, {}, false});
             }
         }
+        if (FD_ISSET(wakeup.reader, &reads)) wakeup.consume();
 
         for (size_t i = 0; i < clients.size();) {
             Client& client = clients[i];
@@ -276,7 +359,8 @@ int TcpGatewayServer::run() {
                 else if (received < 0) {
                     if (!wouldBlock()) remove = true;
                 } else {
-                    for (int j = 0; j < received && !remove; ++j) {
+                    for (int j = 0; j < received && !remove &&
+                                             !client.close_after_write; ++j) {
                         const char ch = bytes[static_cast<size_t>(j)];
                         if (ch == '\n') {
                             handleLine(client, client.input);
@@ -325,6 +409,7 @@ int TcpGatewayServer::run() {
     drainEvents();
 
     for (const auto& client : clients) closeSocket(client.socket);
+    wakeup.close();
     closeSocket(listener);
 #ifdef _WIN32
     WSACleanup();

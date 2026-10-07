@@ -105,3 +105,37 @@ TEST(Matching, MarketOrderSweepsMultipleLevels) {
     EXPECT_EQ(t[1].price, 101u);
     EXPECT_EQ(t[2].price, 102u);
 }
+
+TEST(Matching, CancelOrderReportsPresenceAndRemovesIt) {
+    MatchingEngine me;
+    std::vector<Trade> trades;
+    ASSERT_TRUE(me.tryProcess(makeLimit(1, Side::Buy, 100, 10), trades));
+    EXPECT_TRUE(me.cancelOrder(1));
+    EXPECT_FALSE(me.cancelOrder(1));
+    EXPECT_FALSE(me.book().bestBid().has_value());
+}
+
+TEST(Matching, ModifyReentersAtBackOfPriceLevel) {
+    MatchingEngine me;
+    std::vector<Trade> trades;
+    ASSERT_TRUE(me.tryProcess(makeLimit(1, Side::Sell, 100, 5, 1), trades));
+    ASSERT_TRUE(me.tryProcess(makeLimit(2, Side::Sell, 100, 5, 2), trades));
+
+    ASSERT_TRUE(me.modifyOrder(1, Side::Sell, 100, 5, trades));
+    EXPECT_FALSE(me.modifyOrder(999, Side::Sell, 100, 1, trades));
+    trades = me.process(makeLimit(3, Side::Buy, 100, 5));
+    ASSERT_EQ(trades.size(), 1u);
+    EXPECT_EQ(trades[0].sell_order_id, 2u);
+}
+
+TEST(Matching, CheckedEntryRejectsDuplicateAndInvalidOrders) {
+    MatchingEngine me;
+    std::vector<Trade> trades;
+    EXPECT_FALSE(me.tryProcess(makeLimit(0, Side::Buy, 100, 1), trades));
+    EXPECT_FALSE(me.tryProcess(makeLimit(1, Side::Buy, 0, 1), trades));
+    EXPECT_FALSE(me.tryProcess(makeLimit(1, Side::Buy, 100, 0), trades));
+    ASSERT_TRUE(me.tryProcess(makeLimit(1, Side::Buy, 100, 1), trades));
+    EXPECT_FALSE(me.tryProcess(makeLimit(1, Side::Sell, 101, 1), trades));
+    EXPECT_EQ(me.book().bestBid().value(), 100u);
+    EXPECT_FALSE(me.book().bestAsk().has_value());
+}
