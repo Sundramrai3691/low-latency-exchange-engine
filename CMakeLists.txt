@@ -16,8 +16,12 @@ add_library(engine STATIC
     src/order_book_v2.cpp
     src/matching_engine.cpp
     src/itch/itch_parser.cpp
+    src/gateway/tcp_server.cpp
 )
 target_include_directories(engine PUBLIC src/)
+if(WIN32)
+    target_link_libraries(engine PUBLIC ws2_32)
+endif()
 
 # ---------------------------------------------------------------------------
 # Main binary
@@ -45,6 +49,9 @@ add_executable(tests
     tests/test_spsc.cpp
     tests/test_itch_parser.cpp
     tests/test_pipeline.cpp
+    tests/test_gateway_protocol.cpp
+    tests/test_gateway_worker.cpp
+    tests/test_tcp_gateway.cpp
 )
 find_package(Threads REQUIRED)
 target_link_libraries(tests PRIVATE engine GTest::gtest GTest::gtest_main Threads::Threads)
@@ -70,3 +77,7 @@ target_compile_options(bench_spsc PRIVATE -O3)
 add_executable(bench_pipeline benchmarks/bench_pipeline.cpp)
 target_link_libraries(bench_pipeline PRIVATE engine Threads::Threads)
 target_compile_options(bench_pipeline PRIVATE -O3)
+
+add_executable(bench_gateway benchmarks/bench_gateway.cpp)
+target_link_libraries(bench_gateway PRIVATE engine Threads::Threads)
+target_compile_options(bench_gateway PRIVATE -O3)

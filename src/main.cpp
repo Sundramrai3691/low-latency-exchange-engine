@@ -1,6 +1,7 @@
 #include "concurrency/feed_thread.hpp"
 #include "concurrency/spsc_queue.hpp"
 #include "exchange_pipeline.hpp"
+#include "gateway/tcp_server.hpp"
 #include "itch/itch_parser.hpp"
 #include "matching_engine.hpp"
 #include "order.hpp"
@@ -12,6 +13,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -169,12 +171,22 @@ int main(int argc, char* argv[]) {
     static constexpr size_t SYNTHETIC_N = 1'000'000u;
 
     try {
+        if (argc >= 2 && std::string(argv[1]) == "--tcp") {
+            unsigned long requested_port = 9000;
+            if (argc >= 3) requested_port = std::stoul(argv[2]);
+            if (requested_port == 0 || requested_port > 65535)
+                throw std::invalid_argument("TCP port must be between 1 and 65535");
+            std::cout << "Starting TCP order gateway on port " << requested_port << "\n";
+            TcpGatewayServer server(static_cast<uint16_t>(requested_port));
+            return server.run();
+        }
         if (argc >= 2) {
             const auto result = runITCHMode(argv[1]);
             printResult("ITCH 5.0 Replay", result);
         } else {
             std::cout
                 << "Usage: ./matching_engine [path/to/itch/file.bin]\n"
+                << "       ./matching_engine --tcp [port]\n"
                 << "No file provided — running synthetic mode ("
                 << SYNTHETIC_N << " orders).\n\n";
             const auto result = runSyntheticMode(SYNTHETIC_N);
