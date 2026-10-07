@@ -1,0 +1,33 @@
+{
+    "version": 8,
+    "configurePresets": [
+        {
+            "name": "gcc-release",
+            "displayName": "GCC Release (MinGW-w64)",
+            "description": "Release build using the installed MinGW-w64 POSIX-thread GCC toolchain.",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/gcc-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "C:/mingw64/bin/gcc.exe",
+                "CMAKE_CXX_COMPILER": "C:/mingw64/bin/g++.exe"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "gcc-release",
+            "configurePreset": "gcc-release",
+            "jobs": 4
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "gcc-release",
+            "configurePreset": "gcc-release",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}
